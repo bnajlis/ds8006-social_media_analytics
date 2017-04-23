@@ -1,0 +1,466 @@
+---
+title: "DS8006 - Lab 7"
+author: "Najlis, Bernardo"
+date: "March 30, 2017"
+output: html_document
+---
+
+# Hypothesis Testing with Network Data from MOOCs:
+Exponential Random Graph Models (ERGMs)
+
+These are the libraries required for this lab:
+```{r, message=FALSE, warning=FALSE, include=FALSE}
+library(network)
+library(sna)
+library(ergm)
+library(statnet)
+```
+
+Open network data in R:
+```{r}
+
+edges <- as.matrix(read.table("http://anatoliygruzd.com/wp-content/uploads/2016/DLT1-matrix.csv", 
+                              sep=";", stringsAsFactors = F,
+                              header=T, row.names=1, quote="\""))
+
+atts <-read.table("http://anatoliygruzd.com/wp-content/uploads/2016/DLT1-nodes.csv", 
+                  sep=",", header=T, quote="\"",
+                  stringsAsFactors=F, strip.white=T, as.is=T)
+
+
+
+net <- network(edges, vertex.attr=atts, matrix.type = "adjacency",
+               vertex.attrnames=colnames(atts),
+               directed=T, hyper=F, loops=F, 
+               multiple=F, bipartite=F)
+
+```
+
+Here, some general attributes about the network created from the data files:
+
+```{r}
+net
+```
+
+"ERGM is a statistical approach to modeling social network structure that goas beyond the descriptive methods conventionally used in social network analysis.
+
+Although it was developed to handle the inherent non-independence of network data, the results of ERGM are interpreted in similar ways to logistic regression, makin this a very useful method for examining social systems."
+
+```{r}
+
+summary.network(net,print.adj = FALSE)
+
+plot(net)
+
+```
+
+We create what we will be considering as the "null hypothesis model", a basis model with no assumptions, that we will be comparing with our further improved models.
+
+```{r}
+
+#NULL MODEL
+model0 <- ergm(net ~ edges)
+summary(model0)
+```
+
+When comparing further models, we will consider the probability of a tie to be equal to the network density of the Null model:
+```{r}
+#Calculating the probability
+model0_prob <- plogis (coef(model0)[[1]])
+model0_prob
+```
+
+Now let's try to visualize the potential incidence of gender in the relationships between nodes (do people with the same gender tend to cluster?)
+
+```{r}
+
+plot(net, vertex.col=c("blue","red")[1+(network::get.vertex.attribute(net, "gender")=="female")])
+
+```
+
+This tells us the number of ties between gender in the observed network:
+```{r}
+mixingmatrix(net, "gender")
+```
+
+## Model 1: Gender
+
+Now, let's create a new model to test the differential homophily based on the gender.
+Homophily by a field is defined by nodematch().
+
+**Uniform homophily and differential homophily:** *The attrname argument is a character vector giving one or more names of attributes in the network's vertex attribute list. When diff=FALSE, this term adds one network statistic to the model, which counts the number of edges (i,j) for which attrname(i)==attrname(j). This is also called "uniform homophily," because each group is assumed to have the same propensity for within-group ties. When multiple attribute names are given, the statistic counts only ties for which all of the attributes match. When diff=TRUE, p network statistics are added to the model, where p is the number of unique values of the attrname attribute. The kth such statistic counts the number of edges (i,j) for which attrname(i) == attrname(j) == value(k), where value(k) is the kth smallest unique value of the attrname attribute. This is also called "differential homophily," because each group is allowed to have a unique propensity for within-group ties. Note that a statistical test of uniform vs. differential homophily should be conducted using the ANOVA function.*
+
+*If set to non-NULL, the optional keep argument should be a vector of integers giving the values of k that should be considered for matches; other values are ignored (this works for both diff=FALSE and diff=TRUE). For instance, to add two statistics, counting the matches for just the 2nd and 4th categories, use nodematch with diff=TRUE and keep=c(2,4).*
+
+```{r}
+model1 <- ergm(net ~ edges +  nodematch('gender',diff=TRUE))
+```
+
+## Model Evaluation
+
+### Option 1: AIC / BIC Comparison
+
+The first option is to compare the values of **AIC / BIC** from the model summary with the ones from the null model. If they are lower, adding gender improved the model.
+
+```{r}
+summary(model1)
+```
+
+This is the probability of a tie existing between nodes from different genders:
+```{r}
+model1_prob_diff.genders <- plogis(coef(model1)[[1]])
+model1_prob_diff.genders
+```
+
+This is the probability of a tie existing between nodes with gender "female":
+```{r}
+model1_prob_nodematch.gender.female <- plogis(coef(model1)[[1]] + coef(model1)[[2]])
+model1_prob_nodematch.gender.female
+```
+
+This is the probability of a tie existing between nodes with gender "male" (**marked as non-statistically significant from model1 p-values in nodematch.gender.male**).
+```{r}
+model1_prob_nodematch.gender.male <- plogis(coef(model1)[[1]] + coef(model1)[[3]])
+model1_prob_nodematch.gender.male
+```
+### Option 2.1: Simulated vs. Observed Networks - Mixing matrix comparison
+
+To further compare, we will create a simulated network based on the null model, and look at the gender mixing model.
+
+```{r}
+# First, simulate a network based on the null model:
+model0.sim <- simulate(model0,nsim=1) 
+
+# Check # of ties between the same gender nodes in the simulated network 
+mixingmatrix( model0.sim,"gender")
+```
+
+The second option to evaluate the model, is to compare the mixing matrix from the observed network vs outputs from simulated networks in the null model and the gender model.
+
+For this, we will first create a simulated network based on the gender model, and compare the number of ties between same gender nodes for it.
+
+```{r}
+# Simulate one network based on the Gender model
+model1.sim <- simulate(model1,nsim=1) 
+# Check # of ties between the same gender nodes  in the simulated network 
+mixingmatrix( model1.sim,"gender")
+```
+
+## Option 2.2: Simulated vs. Observed Networks - Plot comparison
+
+To further compare these networks, we can plot the null-model simulated network, the gender-model simulated network with the original network:
+
+```{r}
+plot(model0.sim, vertex.col=c("blue","red")[1+(get.vertex.attribute(net, "gender")=="female")])
+plot(model1.sim, vertex.col=c("blue","red")[1+(get.vertex.attribute(net, "gender")=="female")])
+
+```
+
+## Model 2: Goodness-of-fit comparison
+
+Additional comparison is done by checking the model goodnes-of-fit.
+
+```{r}
+model1.gof <- gof(model1)
+plot(model1.gof)
+```
+
+# Gender + Experience Model
+
+We will try another model. As we learned that **differential *gender* homophily for females** improves the probability of edges in the previous model, and the simulation determined it it statistically significant, we will keep that in the model. We are now adding *experience*.
+
+** Covariate**: *Main effect of a covariate: The attrname argument is a character string giving the name of a numeric (not categorical) attribute in the network's vertex attribute list. This term adds a single network statistic to the model equaling the sum of attrname(i) and attrname(j) for all edges (i,j) in the network. For categorical attributes, see nodefactor. Note that for directed networks, nodecov equals nodeicov plus nodeocov.*
+
+```{r}
+model2 <- ergm(net ~ edges + nodematch("gender", diff=TRUE, 
+                                       keep=c(1)) + # just keep 'female' (to keep 'male', use keep=c(2))
+                 nodecov("experience"))
+
+summary(model2)
+```
+
+## Model 3: Gender + Experience + Region Model
+
+As adding experience proved to be statistically significant, we keep it in the next iteration of the model. We will be adding 'region'.
+
+```{r}
+
+model3 <- ergm(net ~ edges + nodematch("gender", diff=TRUE, keep=c(1)) + 
+                 nodecov("experience") +                   # keep experience
+                 nodematch("region", diff=TRUE))          # add region
+
+summary(model3)
+```
+
+Looking at the p-values marked as statistically significant (marked with *), we decide to keep 'International' and 'South': the model indicates that international students are more likely to reply to each other; and those from the South region.
+
+So let's update model3 and just keep these two node attributes in the model.
+
+```{r}
+
+model3 <- ergm(net ~ edges + nodematch("gender", diff=TRUE, keep=c(1)) + 
+                 nodecov("experience") +                   # keep experience
+                 nodematch("region", diff=TRUE,            # add region
+                           keep=c(1,4)))                   # just keep International (1) and South (4)
+
+summary(model3)
+```
+
+Let's simulate a network based on model 3
+```{r}
+model3.sim <- simulate(model3, nsim=1)
+```
+
+Here is a plot of this simulated network.
+
+```{r}
+plot(model3.sim, vertex.col=c("blue", "red")[1+(get.vertex.attribute(net, "gender")=="female")])
+
+```
+
+
+Now we will check the goodness-of-fit once again:
+
+```{r}
+model3.gof <- gof(model3)
+plot(model3.gof)
+```
+
+## Model 4: Mutuality
+
+For the next model, we will add reciprocity (mutuality).
+
+**Mutuality:** *In binary ERGMs, equal to the number of pairs of actors i and j for which (i,j) and (j,i) both exist. For valued ERGMs, equal to ∑_{i<j} m(y_{i,j},y_{j,i}), where m is determined by form argument: "min" for \min(y_{i,j},y_{j,i}), "nabsdiff" for -|y_{i,j},y_{j,i}|, "product" for y_{i,j}y_{j,i}, and "geometric" for √{y_{i,j}}√{y_{j,i}}. See Krivitsky (2012) for a discussion of these statistics. form="threshold" simply computes the binary mutuality after thresholding at threshold.*
+
+*This term can only be used with directed networks. The binary version also has the following capabilities: if the optional same argument is passed the name of a vertex attribute, only mutual pairs that match on the attribute are counted; separate counts for each unique matching value can be obtained by using diff=TRUE with same; and if by is passed the name of a vertex attribute, then each node is counted separately for each mutual pair in which it occurs and the counts are tabulated by unique values of the attribute. This means that the sum of the mutual statistics when by is used will equal twice the standard mutual statistic. Only one of same or by may be used, and only the former is affected by diff; if both same and by are passed, by is ignored. Finally, if keep is passed a numerical vector, this vector of integers tells which statistics should be kept whenever the mutual term would ordinarily result in multiple statistics.*
+
+```{r}
+
+model4 <- ergm(net ~ edges + nodematch("gender", diff=TRUE, keep=c(1)) + 
+                 nodecov("experience") +                         # keep experience
+                 nodematch("region", diff=TRUE, keep=c(1,4)) +   # just keep International (1) and South (4)
+                 mutual)
+```
+
+These are the statistics for model4.
+
+```{r}
+summary(model4)
+```
+
+Generating a simulated network based on model4:
+
+```{r}
+model4.sim <- simulate(model4, nsim=1)
+```
+
+Here is a plot of this simulated network with model4.
+
+```{r}
+plot(model4.sim, vertex.col=c("blue", "red")[1+(get.vertex.attribute(net, "gender")=="female")])
+```
+
+In addition to checking the goodness-of-fit for the model, we can check it for its statistics:
+
+```{r}
+mcmc.diagnostics(model4)
+```
+
+And here the previous goodness-of-fit evaluation but for model4:
+
+```{r}
+model4.gof <- gof(model4)
+plot(model4.gof)
+```
+
+# Additional models for Lab 7
+
+For this lab, we will skip model5.
+
+## Model 6: Role
+
+We will add the 'role' attribute to create model6.
+
+```{r}
+model6 <- ergm(net ~ edges + nodematch("gender", diff=TRUE, keep=c(1)) + 
+                 nodecov("experience") +                         # keep experience
+                 nodematch("region", diff=TRUE, keep=c(1,4)) +   # keep region just International (1) and South (4) 
+                 mutual +                                        # keep reciprocity / mutuality
+                 nodematch("role1", diff=TRUE)                   # add role
+               )                
+summary(model6)
+```
+It looks like only a couple of roles improve the model (are statistically significant): libmedia, Operations, other, otheredprof, profdev, specialed, techinfrastructure. We will update model6 with only this roles.
+
+```{r}
+model6 <- ergm(net ~ edges + nodematch("gender", diff=TRUE, keep=c(1)) + 
+                 nodecov("experience") +                         # keep experience
+                 nodematch("region", diff=TRUE, keep=c(1,4)) +   # keep just region International (1) and South (4)
+                 mutual +                                        # keep reciprocity / mutuality
+                 nodematch("role1", diff=TRUE,                   # keep role
+                           keep=c(5,6,7,8,9,11,12))              # just keep roles that improve the model
+               )
+summary(model6)
+```
+
+The AIC and BIC metrics cannot be calculated. Let's look at the mixing matrix for role, to see if it helps determining why. We need to create a simulated network based on this model.
+```{r}
+model6.sim <- simulate(model6, nsim=6)
+mixingmatrix(model6.sim, "role1")
+```
+
+Let's try to recreate the model excluding the roles that generated 0 cases.
+
+```{r}
+model6 <- ergm(net ~ edges + nodematch("gender", diff=TRUE, keep=c(1)) + 
+                 nodecov("experience") +                         # keep experience
+                 nodematch("region", diff=TRUE, keep=c(1,4)) +   # keep just region International (1) and South (4)
+                 mutual +                                        # keep reciprocity / mutuality
+                 nodematch("role1", diff=TRUE,                   # keep role
+                           keep=c(5,7,8,11))                     # just keep roles that improve the model
+               )
+summary(model6)
+```
+
+Here is the goodness-of-fit of model6.
+
+```{r}
+model6.gof <- gof(model6)
+plot(model6.gof)
+```
+
+And the goodness-of-fit for model6 statistics.
+
+```{r}
+mcmc.diagnostics(model6)
+```
+
+## Model 7: Grades
+
+For this model we will add 'grades'.
+
+```{r}
+model7 <- ergm(net ~ edges + nodematch("gender", diff=TRUE, keep=c(1)) + 
+                 nodecov("experience") +                            # keep experience
+                 nodematch("region", diff=TRUE, keep=c(1,4)) +      # keep just region International (1) and South (4)
+                 mutual +                                           # keep reciprocity / mutuality
+                 nodematch("role1", diff=TRUE, keep=c(5,7,8,11))  + # keep just roles that improve the model
+                 nodematch("grades", diff=TRUE)   
+               )
+summary(model7)
+```
+
+Again, it looks like only some of the grades improve the model (college, generalist and primary). Let's update model7 to keep just those.
+
+```{r}
+
+model7 <- ergm(net ~ edges + nodematch("gender", diff=TRUE, keep=c(1)) + 
+                 nodecov("experience") +                            # keep experience
+                 nodematch("region", diff=TRUE, keep=c(1,4)) +      # keep just region International (1) and South (4)
+                 mutual +                                           # keep reciprocity / mutuality
+                 nodematch("role1", diff=TRUE, keep=c(5,7,8,11))  + # keep just roles that improve the model
+                 nodematch("grades", diff=TRUE,
+                           keep=c(1,2,4))   
+               )
+summary(model7)
+```
+
+Goodness-of-fit for model7.
+
+```{r}
+model7.gof <- gof(model7)
+plot(model7.gof)
+```
+
+Goodness-of-fit for model7 statistics.
+
+```{r}
+mcmc.diagnostics(model7)
+```
+
+## Model 8: Expert
+
+Another model, keeping all the previous attributes and adding the 'expert' attribute.
+
+```{r}
+model8 <- ergm(net ~ edges + nodematch("gender", diff=TRUE, keep=c(1)) + 
+                 nodecov("experience") +                            # keep experience
+                 nodematch("region", diff=TRUE, keep=c(1,4)) +      # keep just region International (1) and South (4)
+                 mutual +                                           # keep reciprocity / mutuality
+                 nodematch("role1", diff=TRUE, keep=c(5,7,8,11))  + # keep just roles that improve the model
+                 nodematch("grades", diff=TRUE, keep=c(1,2,4)) +    # keep just grades that improve the model   
+                 nodecov("expert")                                  # adding expert
+               )
+summary(model8)
+```
+
+This model does not have statistically significant improvements. We will still calculate and plot its goodness-of-fit and for its attributes.
+
+```{r}
+model8.gof <- gof(model8)
+plot(model8.gof)
+```
+
+Goodness-of-fit for model8 statistics.
+
+```{r}
+mcmc.diagnostics(model8)
+```
+
+## Model 9: Connect
+
+As the last model didn't improve by adding 'expert' we will remove it, before trying to improve it by adding 'connect'.
+
+```{r}
+model9 <- ergm(net ~ edges + nodematch("gender", diff=TRUE, keep=c(1)) + 
+                 nodecov("experience") +                            # keep experience
+                 nodematch("region", diff=TRUE, keep=c(1,4)) +      # keep just region International (1) and South (4)
+                 mutual +                                           # keep reciprocity / mutuality
+                 nodematch("role1", diff=TRUE, keep=c(5,7,8,11))  + # keep just roles that improve the model
+                 nodematch("grades", diff=TRUE, keep=c(1,2,4)) +    # keep just grades that improve the model   
+                 #nodecov("expert")                                 # removed expert
+                 nodecov("connect")                                 # adding connect
+               )
+summary(model9)
+```
+
+Adding connect improves the model, but also makes the south region not statistically significant anymore. Let's first calculate this model goodness-of-fit before one last improvement by removing the south region.
+
+```{r}
+model9.gof <- gof(model9)
+plot(model9.gof)
+```
+
+Goodness-of-fit for model9 statistics.
+
+```{r}
+mcmc.diagnostics(model9)
+```
+
+## Model 10: Removing South region
+
+As by adding the 'connect' attribute we turned the south region as not significant, we will remove it to see if this improves the model once again.
+
+```{r}
+model10 <- ergm(net ~ edges + nodematch("gender", diff=TRUE, keep=c(1)) + 
+                 nodecov("experience") +                            # keep experience
+                 nodematch("region", diff=TRUE, keep=c(1)) +      # keep just region International (1) 
+                 mutual +                                           # keep reciprocity / mutuality
+                 nodematch("role1", diff=TRUE, keep=c(5,7,8,11))  + # keep just roles that improve the model
+                 nodematch("grades", diff=TRUE, keep=c(1,2,4)) +    # keep just grades that improve the model   
+                 nodecov("connect")                                 # adding connect
+               )
+summary(model10)
+```
+It did improve the model a bit further! Let's now see the goodness-of-fit.
+
+```{r}
+model10.gof <- gof(model10)
+plot(model10.gof)
+```
+
+Goodness-of-fit for model10 statistics.
+
+```{r}
+mcmc.diagnostics(model10)
+```

@@ -1,0 +1,114 @@
+---
+title: "DS8006 - Lab 3"
+author: "Najlis, Bernardo"
+date: "February 12, 2017"
+output: pdf_document
+---
+
+
+## Step 1
+
+Complete the '10,000 tweets' tutorial using twitteR searchTwitter function to load 1,000 tweets that mention @RyersonU.
+
+
+```{r, message=F, warning=F}
+library(ggplot2)
+library(lubridate)
+library(scales)
+library(twitteR)
+library(dplyr)
+
+# Oauth authentication with API key and token
+consumer_key <- "pY9vu9ZlKAHIVjO79cNAMH8zy"
+consumer_secret <- "0TZZl6UW7UYDrt3sh27wB5qKZArrvhSHmw1aDsIz7xOa9vXCKv"
+access_token <- "824392227749298177-UfnBjHAkOaJG6wRIvJye4gN6MOAWp8c"
+access_secret <- "Byom7w6p6IUMcrwwKY0jhUCvHGBxMcC5fUZuOash0EHtX"
+
+# Twitter oauth
+setup_twitter_oauth(consumer_key, consumer_secret, access_token, access_secret)
+
+# Get tweets using searchTwitter
+ryeTweets  <-twListToDF( searchTwitter("@RyersonU", n=1000) )
+
+# Add boolean feature isReply
+ryeTweets$isReply <- ifelse((!is.na(ryeTweets$replyToSID) |
+                              !is.na(ryeTweets$replyToSN) |
+                              !is.na(ryeTweets$replyToUID)), TRUE, FALSE)
+```
+## Step 2
+
+Revise the scripts from Step 1 to plot the following charts:
+## Task 1
+
+Number of Reply posts vs. other posts
+
+```{r}
+
+ggplot(ryeTweets, aes(ryeTweets$isReply)) +
+  geom_bar(fill = "midnightblue") + 
+  theme(legend.position="none", axis.title.x = element_blank()) +
+  ylab("Number of tweets") + 
+  ggtitle("Tweets by Type (Reply vs. Other)") +
+  scale_x_discrete(labels=c("Other", "Reply tweets"))
+```
+
+Same plot modified to show percentage values
+```{r}
+ggplot(ryeTweets, aes(x = ryeTweets$isReply)) +
+  geom_bar(aes(y=(..count..) / sum(..count..)), fill = "midnightblue") + 
+  theme(legend.position="none", axis.title.x = element_blank()) +
+  scale_y_continuous(labels=percent) +
+  labs(title = "Tweets by Type (Reply vs. Other)", y="Percentage of tweets") + 
+  scale_x_discrete(labels=c("Other", "Reply tweets"))
+```
+
+## Task 2
+
+Number of Retweets vs other posts
+```{r}
+
+ggplot(ryeTweets, aes(ryeTweets$isRetweet)) +
+  geom_bar(fill = "midnightblue") + 
+  theme(legend.position="none", axis.title.x = element_blank()) +
+  ylab("Number of tweets") + 
+  ggtitle("Tweets by Type (Retweet vs. Other)") +
+  scale_x_discrete(labels=c("Other", "Retweets"))
+```
+
+Same plot modified to show percentage values.
+```{r}
+ggplot(ryeTweets, aes(x = ryeTweets$isRetweet)) +
+  geom_bar(aes(y=(..count..) / sum(..count..)),fill = "midnightblue") + 
+  theme(legend.position="none", axis.title.x = element_blank()) +
+  scale_y_continuous(labels=percent) +
+  labs(y="Number of tweets", title="Tweets by Type (Retweet vs. Other)") +
+  scale_x_discrete(labels=c("Other", "Retweets"))
+```
+
+## Task 3
+
+Plot comparing the distribution of the number of times a post was retweeted, for the original tweets vs retweets.
+
+```{r}
+ggplot(data = ryeTweets, aes(x = retweetCount)) +
+  geom_histogram(aes(fill = ..count..), bins=20, binwidth = 1) +
+  theme(legend.position = "none") +
+  xlab("Retweet count") + ylab("Number of tweets") + ggtitle("Number of Retweets for original tweets vs. Retweets") +
+  xlim(0,30) +
+  scale_fill_gradient(low = "midnightblue", high = "aquamarine4") +
+  facet_grid(isReply ~ .)
+```
+
+## Task 4
+
+Propose a new char to visualize any other metadata field(s) available in your dataset.
+
+```{r}
+# Obtain top 10 users by number of tweets
+top10 <- ryeTweets %>% count(screenName) %>% top_n(n=10)
+
+ggplot(data= top10, aes(reorder(screenName, n),n)) +
+ geom_bar(stat="identity", fill="midnightblue") +
+  coord_flip() +
+  labs(y="Number of Tweets", x="Screen Name",title="Most active Twitter Users")
+```

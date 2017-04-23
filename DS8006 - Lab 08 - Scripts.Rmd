@@ -1,0 +1,137 @@
+---
+title: "DS8006 - Lab 8"
+author: "Najlis, Bernardo"
+date: "April 13, 2017"
+output: html_document
+---
+# Geo-coding and visualizing Twitter Data
+
+### Step 1: Enable Pings to the Twitter API
+
+```{r setup, include=FALSE}
+if (!require("twitteR")) {
+  install.packages("twitteR", repos="http://cran.rstudio.com/") 
+  library("twitteR")
+}
+#Oauth authentication with API key and token
+consumer_key <- "pY9vu9ZlKAHIVjO79cNAMH8zy"
+consumer_secret <- "0TZZl6UW7UYDrt3sh27wB5qKZArrvhSHmw1aDsIz7xOa9vXCKv"
+access_token <- "824392227749298177-UfnBjHAkOaJG6wRIvJye4gN6MOAWp8c"
+access_secret <- "Byom7w6p6IUMcrwwKY0jhUCvHGBxMcC5fUZuOash0EHtX"
+options(httr_oauth_cache=T) #This will enable the use of a local file to cache OAuth access credentials between R sessions.
+
+setup_twitter_oauth(consumer_key,
+                    consumer_secret,
+                    access_token,
+                    access_secret)
+```
+
+### Step 2: Download the Followers for a Given Twitter Account
+
+```{r}
+stephenharper <- getUser("stephenharper")
+location(stephenharper)
+
+num_followers <- stephenharper$followersCount
+sh_follower_ids <- stephenharper$getFollowers(n=3000)
+```
+
+### Step 3: Organize the data you've just acquired
+
+```{r}
+library("data.table")
+sh_followers_df <- rbindlist(lapply(sh_follower_ids, as.data.frame))
+head(sh_followers_df$location,10)
+
+sh_followers_with_location_df <- subset(sh_followers_df, location != "")
+
+```
+
+### Step 4: Geocode Followers' Locations
+```{r}
+# Data cleanup
+sh_followers_with_location_df$location <- gsub("%", "", sh_followers_with_location_df$location)
+sh_followers_with_location_df$location <-  gsub("[^0-9A-Za-z#///' ]", " ", sh_followers_with_location_df$location) # Cleanup invalid characters
+
+google_api_key <- "AIzaSyBGPkY2RZccXOzAq-_KwIywQb6-bYZIAjU"
+#Install key package helpers:
+source("https://raw.githubusercontent.com/LucasPuente/geocoding/master/geocode_helpers.R")
+#Install modified version of the geocode function
+#(that now includes the api_key parameter):
+source("https://raw.githubusercontent.com/LucasPuente/geocoding/master/modified_geocode.R")
+
+geocode_apply<-function(x){
+    geocode(x, source = "google", output = "all", api_key=google_api_key)
+}
+
+geocode_results <- sapply(sh_followers_with_location_df$location, geocode_apply, simplify = F)
+geocode_results_backup <- geocode_results
+geocode_results <- geocode_results_backup
+```
+
+### Step 5: Clean geocoding results
+```{r}
+
+condition_a <- sapply(geocode_results, function(x) x["status"]=="OK")
+geocode_results<-geocode_results[condition_a]
+
+condition_b <- lapply(geocode_results, lapply, length)
+condition_b2<-sapply(condition_b, function(x) x["results"]=="1")
+geocode_results<-geocode_results[condition_b2]
+length(geocode_results)
+
+source("https://raw.githubusercontent.com/LucasPuente/geocoding/master/cleaning_geocoded_results.R")
+
+
+results_b <- lapply(geocode_results, as.data.frame)
+
+results_c<-lapply(results_b,function(x) subset(x, select=c("results.formatted_address",
+                                                           "results.geometry.location")))
+
+results_d<-lapply(results_c,function(x) data.frame(Location=x[1,"results.formatted_address"],
+                                                   lat=x[1,"results.geometry.location"],
+                                                   lng=x[2,"results.geometry.location"]))
+
+results_e<-rbindlist(results_d)
+
+results_f<-results_e[,Original_Location:=names(results_d)]
+
+canadian_results<-subset(results_f,
+                  grepl(", Canada", results_f$Location)==TRUE)
+
+head(canadian_results)
+
+canadian_results$commas<-sapply(canadian_results$Location, function(x)
+  length(as.numeric(gregexpr(",", as.character(x))[[1]])))
+
+canadian_results<-subset(canadian_results, commas==2)
+#Drop the "commas" column:
+canadian_results<-subset(canadian_results, select=-commas)
+
+nrow(canadian_results)
+
+```
+
+### Step 6: Map the Geocoded Results
+
+```{r}
+# Load / install maps and mapproj packages
+ipak <- function(pkg){
+    new.pkg <- pkg[!(pkg %in% installed.packages()[, "Package"])]
+    if (length(new.pkg)) 
+        install.packages(new.pkg, dependencies = TRUE, repos="http://cran.rstudio.com/")
+    sapply(pkg, require, character.only = TRUE)
+}
+
+ipak(c("maps", "mapproj"))
+library(mapdata)
+
+#Generate a blank map:
+canada_map <- map("worldHires", "Canada", proj="albers", param=c(39,45), 
+                  xlim=c(-141, -53), ylim=c(40,85), col="gray90", fill=T, bg=NA, lwd=0.2, add=FALSE, resolution=1)
+
+#Add points to it:
+points(mapproject(canadian_results$lng, canadian_results$lat), col=NA, bg="#00000030", pch=21, cex=1.0)
+#Add a title:
+mtext("The Geography of @StephenHarper's Followers", side = 3, line = -3.5, outer = T, cex=1.5, font=3)
+```
